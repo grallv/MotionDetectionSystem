@@ -13,7 +13,7 @@ import mediapipe as mp
 ############################################
 ######### Initialize video capture #########
 ############################################
-cap = cv2.VideoCapture(1)
+cap = cv2.VideoCapture(0)
 # cap = cv2.VideoCapture('videos\WIN_20250729_10_35_56_Pro.mp4')
 # cap = cv2.VideoCapture('videos\WhatsApp Video 2025-08-05 um 15.23.47_b4e1a516.mp4')
 os.makedirs("movement_clips", exist_ok=True)
