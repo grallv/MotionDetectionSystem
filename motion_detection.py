@@ -21,7 +21,7 @@ os.makedirs("movement_clips", exist_ok=True)
 ############################################
 ################ Parameters ################
 ############################################
-motion_threshold = 4.5
+motion_threshold = 3.5
 cooldown = 5  # seconds
 recording_fps = 20
 buffer = 2  # seconds
@@ -39,19 +39,25 @@ paused = False
 prev_gray_roi = None
 
 # dense optical flow
-pyr_scale=0.5     # pyramid scale
-levels=3          # number of pyramid levels
-winsize=15        # window size for motion estimation
-iterations=3      # iterations at each pyramid level
-poly_n=7          # neighborhood size for polynomial expansion
-poly_sigma=1.5    # Gaussian smoothing before expansion
-flags=0           # no special flags
+pyr_scale = 0.5     # pyramid scale
+levels = 3          # number of pyramid levels
+winsize = 15        # window size for motion estimation
+iterations = 3      # iterations at each pyramid level
+poly_n = 7          # neighborhood size for polynomial expansion
+poly_sigma = 1.5    # Gaussian smoothing before expansion
+flags = 0           # no special flags
 
 # mediapipe
 static_image_mode = False
 max_num_hands = 1
 min_detection_confidence = 0.5
 min_tracking_confidence = 0.5
+
+# pause handling
+resume_grace = 2.0      # seconds to ignore motion after resume
+resume_until = 0.0      # timestamp until which motion is ignored
+motion_arm_frames = 3   # require this many consecutive motion frames
+motion_frames = 0       # counter of consecutive motion frames
 
 ############################################
 #### Initialize mediapipe hand detection ###
@@ -126,6 +132,11 @@ while True:
 
     if roi is None or roi.size == 0:
         prev_gray_roi = None
+        motion_frames = 0
+        
+        if paused:
+            cv2.putText(frame_out, "PAUSED", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        
         cv2.imshow("Motion detection (ROI)", frame_out)
         key = cv2.waitKey(1) & 0xFF
         if key == 27 or cv2.getWindowProperty("Motion detection (ROI)", cv2.WND_PROP_VISIBLE) < 1:
@@ -135,19 +146,66 @@ while True:
             if paused:
                 print("Paused")
             else:
-                print("Resumed - waiting before reactivating motion detection...")
-                time.sleep(1)
+                print("Resumed - arming in {:.1f}s".format(resume_grace))
+                resume_until = time.time() + resume_grace
+                prev_gray_roi = None  # reset optical flow baseline
+                motion_frames = 0  # reset debounce
+                pre_motion_buffer.clear()  # drop old pre-roll frames
             time.sleep(0.3)
         continue
 
+    # ROI grey & alignment
     gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
     # resize previous frame (if needed)
     if prev_gray_roi is not None and gray_roi.shape != prev_gray_roi.shape:
         prev_gray_roi = cv2.resize(prev_gray_roi, (gray_roi.shape[1], gray_roi.shape[0]))
 
+    # bootstrap baseline if missing
     if prev_gray_roi is None:
         prev_gray_roi = gray_roi.copy()
+        continue
+
+        if paused:
+            cv2.putText(frame_out, "PAUSED", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        cv2.imshow("Motion detection (ROI)", frame_out)
+        key = cv2.waitKey(1) & 0xFF
+        if key == 27 or cv2.getWindowProperty("Motion detection (ROI)", cv2.WND_PROP_VISIBLE) < 1:
+            break
+        elif key == ord("p"):
+            paused = not paused
+            if paused:
+                print("Paused")
+            else:
+                print("Resumed - arming in {:.1f}s".format(resume_grace))
+                resume_until = time.time() + resume_grace
+                prev_gray_roi = None
+                motion_frames = 0
+                pre_motion_buffer.clear()
+            time.sleep(0.3)
+        continue
+
+    # re-arming grace window - ignore motion but keep baseline fresh
+    if time.time() < resume_until:
+        prev_gray_roi = gray_roi.copy()
+        cv2.putText(frame_out, "Re-arming...", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
+        if paused:
+            cv2.putText(frame_out, "PAUSED", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        cv2.imshow("Motion detection (ROI)", frame_out)
+        key = cv2.waitKey(1) & 0xFF
+        if key == 27 or cv2.getWindowProperty("Motion detection (ROI)", cv2.WND_PROP_VISIBLE) < 1:
+            break
+        elif key == ord('p'):
+            paused = not paused
+            if paused:
+                print("Paused")
+            else:
+                print("Resumed - arming in {:.1f}s".format(resume_grace))
+                resume_until = time.time() + resume_grace
+                prev_gray_roi = None
+                motion_frames = 0
+                pre_motion_buffer.clear()
+            time.sleep(0.3)
         continue
 
     if not paused:
