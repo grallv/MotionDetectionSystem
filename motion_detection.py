@@ -10,18 +10,10 @@ import csv
 import mediapipe as mp
 
 ############################################
-######### Initialize video capture #########
-############################################
-cap = cv2.VideoCapture(0)
-# cap = cv2.VideoCapture('videos\WIN_20250729_10_35_56_Pro.mp4')
-# cap = cv2.VideoCapture('videos\WhatsApp Video 2025-08-05 um 15.23.47_b4e1a516.mp4')
-os.makedirs("movement_clips", exist_ok=True)
-
-############################################
 ################ Parameters ################
 ############################################
 # motion
-motion_threshold = 3.5
+motion_threshold = 2.5
 cooldown = 5  # seconds
 recording_fps = 20
 buffer = 2  # seconds
@@ -138,6 +130,14 @@ def reset_motion_state():
     motion_frames = 0
 
 ############################################
+######### Initialize video capture #########
+############################################
+cap = cv2.VideoCapture(0)
+# cap = cv2.VideoCapture('videos\WIN_20250729_10_35_56_Pro.mp4')
+# cap = cv2.VideoCapture('videos\WhatsApp Video 2025-08-05 um 15.23.47_b4e1a516.mp4')
+os.makedirs("movement_clips", exist_ok=True)
+
+############################################
 #### Initialize mediapipe hand detection ###
 ############################################
 mp_hands = mp.solutions.hands
@@ -249,7 +249,6 @@ try:
             motion_mask = cv2.threshold(mag, motion_threshold, 255, cv2.THRESH_BINARY)[1].astype(np.uint8)
 
             # refine with morphology
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
             motion_mask = cv2.morphologyEx(motion_mask, cv2.MORPH_OPEN, kernel)
 
             # motion decision: area fraction (more stable than tiny contour area)
@@ -289,13 +288,14 @@ try:
             if video_writer is not None:
                 video_writer.write(frame)
 
-            # Update last motion time and stop after a quiet gap
-            if motion_detected:
-                last_motion_time = current_time
+                # Update last motion time and stop after a quiet gap
+                if motion_detected:
+                    last_motion_time = current_time
 
-            if video_writer is not None and (current_time - last_motion_time > cooldown):
-                video_writer.release()
-                video_writer = None
+                if (current_time - last_motion_time > cooldown):
+                    video_writer.release()
+                    video_writer = None
+                    reset_motion_state()
 
             # Update previous frame
             prev_gray_roi = gray_roi.copy()
