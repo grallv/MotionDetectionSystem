@@ -38,6 +38,13 @@ last_motion_time = 0.0
 paused = False
 prev_gray_roi = None
 
+# testing additional globals
+event_counter = 0
+current_event_id = None
+frames_written = 0  # per recording session
+active_filename = None
+t_trigger = None  # float seconds since epoch
+
 # dense optical flow
 pyr_scale = 0.5     # pyramid scale
 levels = 3          # number of pyramid levels
@@ -91,6 +98,28 @@ def log_movement_csv(timestamp, filename, event="Movement detected"):
     except Exception as e:
         print(f"[Error] Failed to write log: {e}")
 
+# testing additional event logging
+def log_event_csv(event_type, timestamp, filename, extra=None):
+    # event_type: "start" or "end"
+    log_file_path = "event_log.csv"
+    new_file = not os.path.exists(log_file_path)
+    cols = ["event_id","type","timestamp","filename","fps","buffer_s","cooldown_s",
+            "motion_threshold","area_frac_thresh","motion_arm_frames",
+            "pre_roll_frames","frames_written","roi_w","roi_h",
+            "t_trigger", "t_end", "t_last_motion"]
+    try:
+        with open(log_file_path, "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=cols)
+            if new_file: w.writeheader()
+            row = {k:"" for k in cols}
+            if extra: row.update(extra)
+            row["type"] = event_type
+            row["timestamp"] = timestamp
+            row["filename"] = filename
+            w.writerow(row)
+    except Exception as e:
+        print(f"[Error] event log: {e}")
+
 # pause
 def toggle_pause():
     global paused, resume_until, prev_gray_roi, motion_frames
@@ -132,8 +161,8 @@ def reset_motion_state():
 ############################################
 ######### Initialize video capture #########
 ############################################
-# cap = cv2.VideoCapture(0)
-cap = cv2.VideoCapture('tests/scripted_bursts.mp4')
+cap = cv2.VideoCapture(0)
+# cap = cv2.VideoCapture('tests/scripted_bursts.mp4')
 # cap = cv2.VideoCapture('tests/idle_baseline.mp4')
 os.makedirs("movement_clips", exist_ok=True)
 
@@ -279,6 +308,27 @@ try:
                 for fr in pre_motion_buffer:
                     video_writer.write(fr)
 
+                event_counter += 1
+                current_event_id = event_counter
+                frames_written = 0
+                active_filename = filename
+                t_trigger = time.time()
+                
+                extra = {
+                    "event_id": current_event_id,
+                    "fps": recording_fps,
+                    "buffer_s": buffer,
+                    "cooldown_s": cooldown,
+                    "motion_threshold": motion_threshold,
+                    "area_frac_thresh": 0.01,
+                    "motion_arm_frames": motion_arm_frames,
+                    "pre_roll_frames": len(pre_motion_buffer),
+                    "roi_w": (x2 - x) if roi is not None else "",
+                    "roi_h": (y2 - y) if roi is not None else "",
+                    "t_trigger": repr(t_trigger),
+                }
+                log_event_csv("start", timestamp, filename, extra)
+
                 log_movement_csv(timestamp, filename)
 
                 # play alert
@@ -287,6 +337,7 @@ try:
             # Write frame if currently recording
             if video_writer is not None:
                 video_writer.write(frame)
+                frames_written += 1
 
                 # Update last motion time and stop after a quiet gap
                 if motion_detected:
@@ -294,6 +345,22 @@ try:
 
                 if (current_time - last_motion_time) > cooldown:
                     video_writer.release()
+
+                    t_end = time.time()
+                    end_ts = time.strftime("%Y-%m-%d_%H-%M-%S")
+                    extra_end = {
+                        "event_id": current_event_id,
+                        "frames_written": frames_written,
+                        "t_end": repr(t_end),
+                        "t_last_motion": repr(last_motion_time),
+                    }
+                    log_event_csv("end", end_ts, filename, extra_end)
+
+                    current_event_id = None
+                    frames_written = 0
+                    active_filename = None
+                    t_trigger = None
+                    
                     video_writer = None
                     reset_motion_state()
 
@@ -308,7 +375,20 @@ try:
 finally:
     cap.release()
     if video_writer:
-        video_writer.release()
+        try:
+            # write end row if we have instrumentation
+            end_ts = time.strftime("%Y-%m-%d_%H-%M-%S")
+            try:
+                extra_end = {
+                    "event_id": current_event_id,
+                    "frames_written": frames_written,
+                }
+                log_event_csv("end", end_ts, active_filename or "", extra_end)
+            except NameError:
+                pass
+            video_writer.release()
+        except Exception:
+            pass
     try:
         hands.close()
     except Exception:
